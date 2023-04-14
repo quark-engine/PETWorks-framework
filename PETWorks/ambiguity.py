@@ -10,18 +10,14 @@ from PETWorks.arx import (
 
 
 def _setDataHierarchies(
-    data: Data, hierarchies: dict[str, List[List[str]]]
+    data: Data, hierarchies: Dict[str, List[List[str]]]
 ) -> None:
     for attributeName, hierarchy in hierarchies.items():
         data.getDefinition().setAttributeType(attributeName, hierarchy)
 
 
 def _measureAmbiguity(original: Data, anonymized: Data) -> float:
-    utility = (
-        original.getHandle()
-        .getStatistics()
-        .getQualityStatistics(anonymized.getHandle())
-    )
+    return UtilityMetrics.evaluate(original, anonymized).ambiguity
 
 
 def PETValidation(original, anonymized, _, dataHierarchy, **other):

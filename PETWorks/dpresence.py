@@ -8,10 +8,10 @@ from PETWorks.arx import JavaApi
 def _measureDPresence(
     data: Data, subset: Data, dMin: float, dMax: float, javaApi: JavaApi
 ) -> bool:
-    qiNames = getQiNames(dataHandle)
+    qiNames = getQiNames(data)
 
-    groupedData = getDataFrame(dataHandle).groupby(qiNames)
-    groupedSubset = getDataFrame(subset.getHandle()).groupby(qiNames)
+    groupedData = getDataFrame(data).groupby(qiNames)
+    groupedSubset = getDataFrame(subset).groupby(qiNames)
 
     for _, subsetGroup in groupedSubset:
         count = 0

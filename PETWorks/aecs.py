@@ -10,14 +10,7 @@ def _setDataHierarchies(data: Data, javaApi: JavaApi) -> None:
 
 
 def _measureAECS(original: Data, anonymized: Data) -> float:
-    utility = (
-        original.getHandle()
-        .getStatistics()
-        .getQualityStatistics(anonymized.getHandle())
-    )
-
-    aecs = utility.getAverageClassSize().getValue()
-    return aecs
+    return UtilityMetrics.evaluate(original, anonymized).aecs
 
 
 def PETValidation(original, anonymized, _):

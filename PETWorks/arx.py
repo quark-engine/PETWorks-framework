@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 import pandas as pd
 import numpy as np
@@ -64,17 +65,30 @@ class JavaApi:
             setattr(self, name, api)
 
 
+@dataclass
+class UtilityMetrics:
+    ambiguity: float
+    precision: float
+    nonUniformEntropy: float
+    aecs: float
 
-Data = gateway.jvm.org.deidentifier.arx.Data
-Charset = gateway.jvm.java.nio.charset.Charset
-CSVHierarchyInput = gateway.jvm.org.deidentifier.arx.io.CSVHierarchyInput
-Hierarchy = gateway.jvm.org.deidentifier.arx.AttributeType.Hierarchy
-ARXConfiguration = gateway.jvm.org.deidentifier.arx.ARXConfiguration
-KAnonymity = gateway.jvm.org.deidentifier.arx.criteria.KAnonymity
-ARXAnonymizer = gateway.jvm.org.deidentifier.arx.ARXAnonymizer
-AttributeType = gateway.jvm.org.deidentifier.arx.AttributeType
-Int = gateway.jvm.int
+    @staticmethod
+    def evaluate(originalData: Data, anonymizedData: Data) -> "UtilityMetrics":
+        statistics = (
+            originalData.getHandle()
+            .getStatistics()
+            .getQualityStatistics(anonymizedData.getHandle())
+        )
+        ambiguity = statistics.getAmbiguity().getValue()
+        precision = statistics.getGeneralizationIntensity().getArithmeticMean(
+            False
+        )
+        nonUniformEntropy = (
+            statistics.getNonUniformEntropy().getArithmeticMean(False)
+        )
+        aecs = statistics.getAverageClassSize().getValue()
 
+        return UtilityMetrics(ambiguity, precision, nonUniformEntropy, aecs)
 
 
 def loadDataFromCsv(
@@ -141,15 +155,27 @@ def setDataHierarchies(
             )
 
 
-def getQiNames(dataHandle: str) -> list[str]:
+def getAttributeNameByType(
+    attributeTypes: Dict[str, str], type: str
+) -> Iterator[str]:
+    return (
+        attributeName
+        for attributeName, attributeType in attributeTypes.items()
+        if attributeType == type
+    )
+
+
+def getQiNames(data: Data) -> List[str]:
+    dataHandle = data.getHandle()
     qiNameSet = dataHandle.getDefinition().getQuasiIdentifyingAttributes()
     qiNames = [qiName for qiName in qiNameSet]
     qiNames.sort(key=dataHandle.getColumnIndexOf)
     return qiNames
 
 
-def getQiIndices(dataHandle: str) -> list[int]:
-    qiNames = getQiNames(dataHandle)
+def getQiIndices(data: Data) -> List[int]:
+    dataHandle = data.getHandle()
+    qiNames = getQiNames(data)
     qiIndices = []
     for qiName in qiNames:
         qiIndices.append(dataHandle.getColumnIndexOf(qiName))
@@ -157,7 +183,7 @@ def getQiIndices(dataHandle: str) -> list[int]:
     return qiIndices
 
 
-def findAnonymousLevel(hierarchy: list[list[str]], value: str) -> int:
+def findAnonymousLevel(hierarchy: List[List[str]], value: str) -> int:
     for hierarchyRow in hierarchy:
         for level in range(len(hierarchyRow)):
             if hierarchyRow[level] == value:
@@ -166,12 +192,12 @@ def findAnonymousLevel(hierarchy: list[list[str]], value: str) -> int:
 
 
 def getAnonymousLevels(
-    anonymizedSubset: Data, hierarchies: dict[str, list[list[str]]]
-) -> list[int]:
-    subsetDataFrame = getDataFrame(anonymizedSubset.getHandle())
+    anonymizedSubset: Data, hierarchies: Dict[str, Hierarchy]
+) -> List[int]:
+    subsetDataFrame = getDataFrame(anonymizedSubset)
     subsetRowNum = len(subsetDataFrame)
 
-    qiIndices = getQiIndices(anonymizedSubset.getHandle())
+    qiIndices = getQiIndices(anonymizedSubset)
 
     sampleRowIndex = -1
     allSuppressed = False
@@ -184,7 +210,7 @@ def getAnonymousLevels(
         if sampleRowIndex != -1:
             break
 
-        allSuppressed = (subsetRowIndex == subsetRowNum - 1)
+        allSuppressed = subsetRowIndex == subsetRowNum - 1
 
     anonymousLevels = []
     for qiIndex in qiIndices:
@@ -201,7 +227,8 @@ def getAnonymousLevels(
     return anonymousLevels
 
 
-def getDataFrame(dataHandle: str) -> pd.DataFrame:
+def getDataFrame(data: Data) -> pd.DataFrame:
+    dataHandle = data.getHandle()
     rowNum = dataHandle.getNumRows()
     colNum = dataHandle.getNumColumns()
 
@@ -220,9 +247,9 @@ def getDataFrame(dataHandle: str) -> pd.DataFrame:
 
 
 def getSubsetIndices(
-    table: str,
-    subset: str,
-) -> list[int]:
+    table: Data,
+    subset: Data,
+) -> List[int]:
     qiNames = getQiNames(table)
     qiIndices = getQiIndices(table)
 
@@ -236,9 +263,11 @@ def getSubsetIndices(
         subsetGroupList = subsetGroup.values.tolist()
         filter = pd.Series(True, index=range(tableRowNum))
         for qiName, qiIndex in zip(qiNames, qiIndices):
-            filter &= (tableDataFrame[qiName] == subsetGroupList[0][qiIndex])
+            filter &= tableDataFrame[qiName] == subsetGroupList[0][qiIndex]
 
-        subsetIndices += np.flatnonzero(filter).tolist()[:len(subsetGroupList)]
+        subsetIndices += np.flatnonzero(filter).tolist()[
+            : len(subsetGroupList)
+        ]
 
     return subsetIndices
 

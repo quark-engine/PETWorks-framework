@@ -4,13 +4,7 @@ from PETWorks.arx import JavaApi, UtilityMetrics, setDataHierarchies
 
 
 def _measureNonUniformEntropy(original: Data, anonymized: Data) -> float:
-    utility = (
-        original.getHandle()
-        .getStatistics()
-        .getQualityStatistics(anonymized.getHandle())
-    )
-    nonUniformEntropy = utility.getNonUniformEntropy().getArithmeticMean(False)
-    return nonUniformEntropy
+    return UtilityMetrics.evaluate(original, anonymized).nonUniformEntropy
 
 
 def PETValidation(original, anonymized, _, dataHierarchy, **other):

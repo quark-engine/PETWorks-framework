@@ -8,14 +8,7 @@ from PETWorks.arx import (
 
 
 def _measurePrecision(original: Data, anonymized: Data) -> float:
-    utility = (
-        original.getHandle()
-        .getStatistics()
-        .getQualityStatistics(anonymized.getHandle())
-    )
-
-    precision = utility.getGeneralizationIntensity().getArithmeticMean(False)
-    return precision
+    return UtilityMetrics.evaluate(original, anonymized).precision
 
 
 def PETValidation(original, anonymized, _, dataHierarchy, **other):
