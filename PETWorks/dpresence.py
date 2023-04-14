@@ -1,19 +1,12 @@
-from PETWorks.arx import Data, gateway, loadDataFromCsv, loadDataHierarchy
+from PETWorks.arx import Data, loadDataFromCsv, loadDataHierarchy
 from PETWorks.arx import setDataHierarchies, getDataFrame, getQiNames
 from PETWorks.arx import getAnonymousLevels, applyAnonymousLevels
 from py4j.java_gateway import set_field
-
-StandardCharsets = gateway.jvm.java.nio.charset.StandardCharsets
-DataSubset = gateway.jvm.org.deidentifier.arx.DataSubset
-HashSet = gateway.jvm.java.util.HashSet
-DPresence = gateway.jvm.org.deidentifier.arx.criteria.DPresence
-HashGroupifyEntry = (
-    gateway.jvm.org.deidentifier.arx.framework.check.groupify.HashGroupifyEntry
-)
+from PETWorks.arx import JavaApi
 
 
 def _measureDPresence(
-    dataHandle: str, subset: Data, dMin: float, dMax: float
+    data: Data, subset: Data, dMin: float, dMax: float, javaApi: JavaApi
 ) -> bool:
     qiNames = getQiNames(dataHandle)
 
@@ -33,9 +26,9 @@ def _measureDPresence(
             if subsetGroupList[0] == dataGroupList[0]:
                 pcount = len(dataGroup)
 
-        dummySubset = DataSubset.create(0, HashSet())
-        model = DPresence(dMin, dMax, dummySubset)
-        entry = HashGroupifyEntry(None, 0, 0)
+        dummySubset = javaApi.DataSubset.create(0, javaApi.HashSet())
+        model = javaApi.DPresence(dMin, dMax, dummySubset)
+        entry = javaApi.HashGroupifyEntry(None, 0, 0)
 
         set_field(entry, "count", count)
         set_field(entry, "pcount", pcount)
@@ -51,20 +44,25 @@ def PETValidation(original, subset, _, dataHierarchy, **other):
     dMin = other["dMin"]
     attributeType = other.get("attributeTypes", None)
 
+    javaApi = JavaApi()
     dataHierarchy = loadDataHierarchy(
-        dataHierarchy, StandardCharsets.UTF_8, ";"
+        dataHierarchy, javaApi.StandardCharsets.UTF_8, ";", javaApi
     )
-    original = loadDataFromCsv(original, StandardCharsets.UTF_8, ";")
-    subset = loadDataFromCsv(subset, StandardCharsets.UTF_8, ";")
+    original = loadDataFromCsv(
+        original, javaApi.StandardCharsets.UTF_8, ";", javaApi
+    )
+    subset = loadDataFromCsv(
+        subset, javaApi.StandardCharsets.UTF_8, ";", javaApi
+    )
 
-    setDataHierarchies(original, dataHierarchy, attributeType)
-    setDataHierarchies(subset, dataHierarchy, attributeType)
+    setDataHierarchies(original, dataHierarchy, attributeType, javaApi)
+    setDataHierarchies(subset, dataHierarchy, attributeType, javaApi)
 
     anonymousLevels = getAnonymousLevels(subset, dataHierarchy)
-    anonymizedData = applyAnonymousLevels(original, anonymousLevels)
+    anonymizedData = applyAnonymousLevels(
+        original, anonymousLevels, dataHierarchy, attributeType, javaApi
+    )
 
-    dPresence = _measureDPresence(anonymizedData, subset, dMin, dMax)
+    dPresence = _measureDPresence(anonymizedData, subset, dMin, dMax, javaApi)
 
-    return {"dMin": dMin,
-            "dMax": dMax,
-            "d-presence": dPresence}
+    return {"dMin": dMin, "dMax": dMax, "d-presence": dPresence}

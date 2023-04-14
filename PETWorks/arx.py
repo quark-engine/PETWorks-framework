@@ -3,15 +3,67 @@ import pandas as pd
 import numpy as np
 from os import PathLike, listdir
 from os.path import join
-from typing import List
+from typing import Dict, Iterator, List, Tuple
 from PETWorks.attributetypes import IDENTIFIER, INSENSITIVE_ATTRIBUTE
 
-from py4j.java_gateway import JavaGateway
+from py4j.java_gateway import JavaGateway, JavaClass
+from py4j.protocol import Py4JJavaError
+
 
 PATH_TO_ARX_LIBRARY = "arx/lib/libarx-3.9.0.jar"
-gateway = JavaGateway.launch_gateway(
-    classpath=PATH_TO_ARX_LIBRARY, die_on_exit=True
-)
+
+Data = JavaClass
+Charset = JavaClass
+StandardCharsets = JavaClass
+CSVHierarchyInput = JavaClass
+Hierarchy = JavaClass
+ARXConfiguration = JavaClass
+KAnonymity = JavaClass
+ARXAnonymizer = JavaClass
+ARXResult = JavaClass
+AttributeType = JavaClass
+Int = JavaClass
+
+javaApiTable = {
+    "Data": "jvm.org.deidentifier.arx.Data",
+    "Charset": "jvm.java.nio.charset.Charset",
+    "StandardCharsets": "jvm.java.nio.charset.StandardCharsets",
+    "CSVHierarchyInput": "jvm.org.deidentifier.arx.io.CSVHierarchyInput",
+    "Hierarchy": "jvm.org.deidentifier.arx.AttributeType.Hierarchy",
+    "DefaultHierarchy": "jvm.org.deidentifier.arx.AttributeType.Hierarchy.DefaultHierarchy",
+    "ARXConfiguration": "jvm.org.deidentifier.arx.ARXConfiguration",
+    "KAnonymity": "jvm.org.deidentifier.arx.criteria.KAnonymity",
+    "ARXAnonymizer": "jvm.org.deidentifier.arx.ARXAnonymizer",
+    "AttributeType": "jvm.org.deidentifier.arx.AttributeType",
+    "ARXPopulationModel": "jvm.org.deidentifier.arx.ARXPopulationModel",
+    "DataHandle": "jvm.org.deidentifier.arx.DataHandle",
+    "DataSubset": "jvm.org.deidentifier.arx.DataSubset",
+    "HashGroupifyEntry": "jvm.org.deidentifier.arx.framework.check.groupify.HashGroupifyEntry",
+    "HashSet": "jvm.java.util.HashSet",
+    "DPresence": "jvm.org.deidentifier.arx.criteria.DPresence",
+    "Int": "jvm.int",
+    "String": "jvm.java.lang.String",
+    "new_array": "new_array",
+}
+
+
+def createJavaGateway() -> JavaGateway:
+    return JavaGateway.launch_gateway(classpath=PATH_TO_ARX_LIBRARY)
+
+
+class JavaApi:
+    def __init__(
+        self,
+        gatewayObject: JavaGateway = None,
+        apiTable: Dict[str, str] = javaApiTable,
+    ):
+        self.gatewayObject = createJavaGateway()
+
+        for name, javaApi in apiTable.items():
+            api = eval("self.gatewayObject." + javaApi)
+            setattr(self, name, api)
+
+
 
 Data = gateway.jvm.org.deidentifier.arx.Data
 Charset = gateway.jvm.java.nio.charset.Charset
@@ -24,14 +76,14 @@ AttributeType = gateway.jvm.org.deidentifier.arx.AttributeType
 Int = gateway.jvm.int
 
 
-def loadDataFromCsv(path: PathLike, charset: Charset, delimiter: str) -> Data:
-    return Data.create(path, charset, delimiter)
+
+def loadDataFromCsv(
+    path: PathLike, charset: Charset, delimiter: str, javaApi: JavaApi
+) -> Data:
+    return javaApi.Data.create(path, charset, delimiter)
 
 
-def loadDataHierarchy(
-    path: PathLike, charset: Charset, delimiter: str
-) -> dict[str, List[List[str]]]:
-    hierarchies = {}
+def __findHierarchyFile(path: PathLike) -> Iterator[Tuple[str, PathLike]]:
     for filename in listdir(path):
         result = re.match(".*hierarchy_(.*?).csv", filename)
         if result is None:
@@ -40,17 +92,39 @@ def loadDataHierarchy(
         attributeName = result.group(1)
 
         dataHierarchyFile = join(path, filename)
-        hierarchy = CSVHierarchyInput(
-            dataHierarchyFile, charset, delimiter
-        ).getHierarchy()
 
-        hierarchies[attributeName] = Hierarchy.create(hierarchy)
+        yield attributeName, dataHierarchyFile
 
-    return hierarchies
+
+def loadDataHierarchy(
+    path: PathLike, charset: Charset, delimiter: str, javaApi: JavaApi
+) -> Dict[str, Hierarchy]:
+    return {
+        attributeName: javaApi.Hierarchy.create(
+            javaApi.CSVHierarchyInput(
+                hierarchyFile, charset, delimiter
+            ).getHierarchy()
+        )
+        for attributeName, hierarchyFile in __findHierarchyFile(path)
+    }
+
+
+def loadDataHierarchyNatively(
+    path: PathLike, delimiter: str
+) -> Dict[str, np.chararray]:
+    return {
+        attributeName: pd.read_csv(hierarchyFile, sep=delimiter).to_numpy(
+            dtype=str
+        )
+        for attributeName, hierarchyFile in __findHierarchyFile(path)
+    }
 
 
 def setDataHierarchies(
-    data: Data, hierarchies: dict[str, list[list[str]]], attributeTypes: dict
+    data: Data,
+    hierarchies: Dict[str, Hierarchy],
+    attributeTypes: Dict[str, str],
+    javaApi: JavaApi,
 ) -> None:
     for attributeName, hierarchy in hierarchies.items():
         data.getDefinition().setAttributeType(attributeName, hierarchy)
@@ -58,12 +132,12 @@ def setDataHierarchies(
 
         if attributeType == IDENTIFIER:
             data.getDefinition().setAttributeType(
-                attributeName, AttributeType.IDENTIFYING_ATTRIBUTE
+                attributeName, javaApi.AttributeType.IDENTIFYING_ATTRIBUTE
             )
 
         if attributeType == INSENSITIVE_ATTRIBUTE:
             data.getDefinition().setAttributeType(
-                attributeName, AttributeType.INSENSITIVE_ATTRIBUTE
+                attributeName, javaApi.AttributeType.INSENSITIVE_ATTRIBUTE
             )
 
 
@@ -169,17 +243,63 @@ def getSubsetIndices(
     return subsetIndices
 
 
-def applyAnonymousLevels(original: Data, anonymousLevels: list[int]) -> str:
-    levels = gateway.new_array(Int, len(anonymousLevels))
+
+def convertJavaListToList(javaList) -> Tuple:
+    length = len(javaList)
+    return tuple(javaList[index] for index in range(length))
+
+
+def anonymizeData(
+    original: Data,
+    privacyModels: List[str],
+    javaApi: JavaApi,
+    utilityModel: str = None,
+    suppressionLimit: float = 0.0,
+) -> ARXResult:
+    arxConfig = javaApi.ARXConfiguration.create()
+
+    arxConfig.setSuppressionLimit(suppressionLimit)
+
+    for privacyModel in privacyModels:
+        arxConfig.addPrivacyModel(privacyModel)
+
+    if utilityModel:
+        arxConfig.setQualityModel(utilityModel)
+
+    try:
+        anonymizer = javaApi.ARXAnonymizer()
+        anonymizedData = anonymizer.anonymize(original, arxConfig)
+    except Py4JJavaError as e:
+        raise e
+
+    return anonymizedData
+
+
+def applyAnonymousLevels(
+    original: Data,
+    anonymousLevels: List[int],
+    hierarchies: Dict[str, Hierarchy],
+    attributeTypes: Dict[str, str],
+    javaApi: JavaApi,
+) -> Data:
+    levels = javaApi.new_array(javaApi.Int, len(anonymousLevels))
     for i in range(len(anonymousLevels)):
         levels[i] = anonymousLevels[i]
 
-    arxConfig = ARXConfiguration.create()
-    arxConfig.addPrivacyModel(KAnonymity(1))
-    anonymizer = ARXAnonymizer()
-    result = anonymizer.anonymize(original, arxConfig)
+    privacyModels = [javaApi.KAnonymity(1)]
 
-    lattice = result.getLattice()
+    try:
+        anonymizedData = anonymizeData(original, privacyModels, javaApi)
+    except Py4JJavaError:
+        return
+
+    lattice = anonymizedData.getLattice()
     node = lattice.getNode(levels)
 
-    return result.getOutput(node, True)
+    result = javaApi.Data.create(
+        anonymizedData.getOutput(node, True).iterator()
+    )
+
+    setDataHierarchies(result, hierarchies, attributeTypes, javaApi)
+
+    return result
