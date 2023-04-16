@@ -5,9 +5,15 @@ import numpy as np
 from os import PathLike, listdir
 from os.path import join
 from typing import Dict, Iterator, List, Tuple
-from PETWorks.attributetypes import IDENTIFIER, INSENSITIVE_ATTRIBUTE
+from PETWorks.attributetypes import (
+    IDENTIFIER,
+    INSENSITIVE_ATTRIBUTE,
+    QUASI_IDENTIFIER,
+)
+from PETWorks.attributetypes import INSENSITIVE_ATTRIBUTE, SENSITIVE_ATTRIBUTE
 
 from py4j.java_gateway import JavaGateway, JavaClass
+from py4j.java_collections import JavaArray
 from py4j.protocol import Py4JJavaError
 
 
@@ -112,7 +118,7 @@ def __findHierarchyFile(path: PathLike) -> Iterator[Tuple[str, PathLike]]:
 
 def loadDataHierarchy(
     path: PathLike, charset: Charset, delimiter: str, javaApi: JavaApi
-) -> Dict[str, Hierarchy]:
+) -> Dict[str, JavaArray]:
     return {
         attributeName: javaApi.Hierarchy.create(
             javaApi.CSVHierarchyInput(
@@ -136,23 +142,29 @@ def loadDataHierarchyNatively(
 
 def setDataHierarchies(
     data: Data,
-    hierarchies: Dict[str, Hierarchy],
+    hierarchies: Dict[str, JavaArray],
     attributeTypes: Dict[str, str],
     javaApi: JavaApi,
 ) -> None:
-    for attributeName, hierarchy in hierarchies.items():
-        data.getDefinition().setAttributeType(attributeName, hierarchy)
-        attributeType = attributeTypes.get(attributeName)
+    for attributeName, attributeType in attributeTypes.items():
+        if attributeName in hierarchies.keys():
+            if attributeType == QUASI_IDENTIFIER:
+                data.getDefinition().setAttributeType(
+                    attributeName, hierarchies[attributeName]
+                )
 
-        if attributeType == IDENTIFIER:
-            data.getDefinition().setAttributeType(
-                attributeName, javaApi.AttributeType.IDENTIFYING_ATTRIBUTE
-            )
+        if attributeType == QUASI_IDENTIFIER:
+            continue
+        elif attributeType == IDENTIFIER:
+            javaAttributeType = javaApi.AttributeType.IDENTIFYING_ATTRIBUTE
+        elif attributeType == SENSITIVE_ATTRIBUTE:
+            javaAttributeType = javaApi.AttributeType.INSENSITIVE_ATTRIBUTE
+        elif attributeType == INSENSITIVE_ATTRIBUTE:
+            javaAttributeType = javaApi.AttributeType.INSENSITIVE_ATTRIBUTE
+        else:
+            raise ValueError(f"Unexpected attribute type: {attributeType}")
 
-        if attributeType == INSENSITIVE_ATTRIBUTE:
-            data.getDefinition().setAttributeType(
-                attributeName, javaApi.AttributeType.INSENSITIVE_ATTRIBUTE
-            )
+        data.getDefinition().setAttributeType(attributeName, javaAttributeType)
 
 
 def getAttributeNameByType(
@@ -183,7 +195,7 @@ def getQiIndices(data: Data) -> List[int]:
     return qiIndices
 
 
-def findAnonymousLevel(hierarchy: List[List[str]], value: str) -> int:
+def findAnonymousLevel(hierarchy: JavaArray, value: str) -> int:
     for hierarchyRow in hierarchy:
         for level in range(len(hierarchyRow)):
             if hierarchyRow[level] == value:
@@ -192,7 +204,7 @@ def findAnonymousLevel(hierarchy: List[List[str]], value: str) -> int:
 
 
 def getAnonymousLevels(
-    anonymizedSubset: Data, hierarchies: Dict[str, Hierarchy]
+    anonymizedSubset: Data, hierarchies: Dict[str, JavaArray]
 ) -> List[int]:
     subsetDataFrame = getDataFrame(anonymizedSubset)
     subsetRowNum = len(subsetDataFrame)
@@ -272,7 +284,6 @@ def getSubsetIndices(
     return subsetIndices
 
 
-
 def convertJavaListToList(javaList) -> Tuple:
     length = len(javaList)
     return tuple(javaList[index] for index in range(length))
@@ -324,6 +335,10 @@ def applyAnonymousLevels(
 
     lattice = anonymizedData.getLattice()
     node = lattice.getNode(levels)
+
+    output = anonymizedData.getOutput(node, True)
+    if not output:
+        return None
 
     result = javaApi.Data.create(
         anonymizedData.getOutput(node, True).iterator()

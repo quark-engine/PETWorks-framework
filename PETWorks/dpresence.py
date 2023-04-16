@@ -1,68 +1,91 @@
-from PETWorks.arx import Data, loadDataFromCsv, loadDataHierarchy
-from PETWorks.arx import setDataHierarchies, getDataFrame, getQiNames
-from PETWorks.arx import getAnonymousLevels, applyAnonymousLevels
-from py4j.java_gateway import set_field
-from PETWorks.arx import JavaApi
+from typing import Dict
+
+import pandas as pd
+
+from PETWorks.arx import (
+    JavaApi,
+    applyAnonymousLevels,
+    getAnonymousLevels,
+    getDataFrame,
+    loadDataFromCsv,
+    loadDataHierarchy,
+    setDataHierarchies,
+)
+from PETWorks.attributetypes import QUASI_IDENTIFIER
 
 
-def _measureDPresence(
-    data: Data, subset: Data, dMin: float, dMax: float, javaApi: JavaApi
+def measureDPresence(
+    populationTable: pd.DataFrame,
+    sampleTable: pd.DataFrame,
+    attributeTypes: Dict[str, str],
+) -> list[float]:
+    qiNames = [
+        qi for qi, value in attributeTypes.items() if value == QUASI_IDENTIFIER
+    ]
+    populationGroups = populationTable.groupby(qiNames).groups
+    sampleGroups = sampleTable.groupby(qiNames).groups
+
+    intersectionGroups = set(populationGroups.keys()).intersection(
+        set(sampleGroups.keys())
+    )
+
+    rawValues = [
+        (
+            float(len(sampleGroups[intersectGroup])),
+            float(len(populationGroups[intersectGroup])),
+        )
+        for intersectGroup in intersectionGroups
+    ]
+
+    deltaValues = [
+        count / pCount for count, pCount in rawValues if pCount != 0
+    ]
+
+    return deltaValues
+
+
+def validateDPresence(
+    deltaValues: list[float], dMin: float, dMax: float
 ) -> bool:
-    qiNames = getQiNames(data)
-
-    groupedData = getDataFrame(data).groupby(qiNames)
-    groupedSubset = getDataFrame(subset).groupby(qiNames)
-
-    for _, subsetGroup in groupedSubset:
-        count = 0
-        pcount = 0
-
-        subsetGroupList = subsetGroup.values.tolist()
-        count = len(subsetGroupList)
-
-        for _, dataGroup in groupedData:
-            dataGroupList = dataGroup.values.tolist()
-
-            if subsetGroupList[0] == dataGroupList[0]:
-                pcount = len(dataGroup)
-
-        dummySubset = javaApi.DataSubset.create(0, javaApi.HashSet())
-        model = javaApi.DPresence(dMin, dMax, dummySubset)
-        entry = javaApi.HashGroupifyEntry(None, 0, 0)
-
-        set_field(entry, "count", count)
-        set_field(entry, "pcount", pcount)
-
-        if not model.isAnonymous(None, entry):
-            return False
-
-    return True
+    return all(dMax >= value >= dMin for value in deltaValues)
 
 
-def PETValidation(original, subset, _, dataHierarchy, **other):
-    dMax = other["dMax"]
-    dMin = other["dMin"]
-    attributeType = other.get("attributeTypes", None)
-
+def PETValidation(
+    original, sample, _, dataHierarchy, attributeTypes, dMin, dMax
+):
     javaApi = JavaApi()
     dataHierarchy = loadDataHierarchy(
         dataHierarchy, javaApi.StandardCharsets.UTF_8, ";", javaApi
     )
-    original = loadDataFromCsv(
+    originalPopulationData = loadDataFromCsv(
         original, javaApi.StandardCharsets.UTF_8, ";", javaApi
     )
-    subset = loadDataFromCsv(
-        subset, javaApi.StandardCharsets.UTF_8, ";", javaApi
+    anonymizedSampleData = loadDataFromCsv(
+        sample, javaApi.StandardCharsets.UTF_8, ";", javaApi
     )
 
-    setDataHierarchies(original, dataHierarchy, attributeType, javaApi)
-    setDataHierarchies(subset, dataHierarchy, attributeType, javaApi)
-
-    anonymousLevels = getAnonymousLevels(subset, dataHierarchy)
-    anonymizedData = applyAnonymousLevels(
-        original, anonymousLevels, dataHierarchy, attributeType, javaApi
+    setDataHierarchies(
+        originalPopulationData, dataHierarchy, attributeTypes, javaApi
+    )
+    setDataHierarchies(
+        anonymizedSampleData, dataHierarchy, attributeTypes, javaApi
     )
 
-    dPresence = _measureDPresence(anonymizedData, subset, dMin, dMax, javaApi)
+    anonymousLevels = getAnonymousLevels(anonymizedSampleData, dataHierarchy)
+    anonymizedPopulation = applyAnonymousLevels(
+        originalPopulationData,
+        anonymousLevels,
+        dataHierarchy,
+        attributeTypes,
+        javaApi,
+    )
 
-    return {"dMin": dMin, "dMax": dMax, "d-presence": dPresence}
+    populationDataFrame = getDataFrame(anonymizedPopulation)
+    sampleDataFrame = getDataFrame(anonymizedSampleData)
+
+    deltaValues = measureDPresence(
+        populationDataFrame, sampleDataFrame, attributeTypes
+    )
+    fulfillDPresence = validateDPresence(deltaValues, float(dMin), float(dMax))
+
+    return {"dMin": dMin, "dMax": dMax, "d-presence": fulfillDPresence}
