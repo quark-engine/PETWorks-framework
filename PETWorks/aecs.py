@@ -25,5 +25,5 @@ def PETValidation(original, anonymized, _):
     _setDataHierarchies(original, javaApi)
     _setDataHierarchies(anonymized, javaApi)
 
-    aecs = _measureAECS(original, anonymized, javaApi)
+    aecs = _measureAECS(original, anonymized)
     return {"AECS": aecs}
