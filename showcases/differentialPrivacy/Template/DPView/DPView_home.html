@@ -1,0 +1,33 @@
+{% extends "general/function_home.html" %}
+{% load i18n %}
+{% block title %}DPView{% endblock title %}
+
+{% block system_hint %}
+    <div>
+        <font>{% trans '1.差分隱私適用於資料筆數較大的資料集，建議至少含有一萬筆紀錄' %}</font>
+    </div>
+    <div>
+        <font>{% trans '2.本系統無法處理具有時序關係的資料，請確認各筆資料間是相互獨立的' %}</font>
+    </div>
+{% endblock system_hint %}
+
+{% block file_hint %}
+    <div>
+        <font>{% trans '1.資料欄位不可少於三欄' %}</font>
+    </div>
+    <div>
+        <font>{% trans '2.檔案不可大於 4 MB' %}</font>
+    </div>
+    <div>
+        <font>{% trans '3.請刪除如姓名、ID等極具識別能力的欄位' %}</font>
+    </div>
+    <div>
+        <font>{% trans '4.檔案請另存新檔為 CSV 檔 (.csv)' %}</font>
+    </div>
+    <div>
+        <font>{% trans '5.英文以外的語系，請將檔案編碼為 UTF-8' %}</font>
+    </div>
+    <div>
+        <font>{% trans '6.標題列不能存在小數點' %}</font>
+    </div>
+{% endblock file_hint %}               

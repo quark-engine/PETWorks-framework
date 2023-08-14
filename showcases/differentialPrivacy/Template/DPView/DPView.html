@@ -1,0 +1,15 @@
+{% extends "general/function.html" %}
+{% load i18n %}
+{% block title %}DPView {{ block.super }}{% endblock title %}
+
+{% block hint %}
+    <div>
+        <font>{% trans '1：num_bucket 的值不能小於1' %}</font>
+    </div>
+    <div>
+        <font>{% trans '2：privacy_budget 的值不能小於0' %}</font>
+    </div>
+    <div>
+        <font>{% trans '3：差分隱私適用於資料筆數較大的資料集，建議至少含有一萬筆紀錄且維度也會受資料筆數影響不能太高。' %}</font>
+    </div>
+{% endblock hint %}
